@@ -111,6 +111,24 @@ func (crc ContainerRuntimeCheck) Check() (warnings, errorList []error) {
 	return warnings, errorList
 }
 
+type InitSystemCheck struct {
+}
+
+// Name returns label for IniSystemCheck.
+func (sc InitSystemCheck) Name() string {
+	return "InitSystem"
+}
+
+func (sc InitSystemCheck) Check() (warnings, errorList []error) {
+	klog.V(1).Info("validating if the init system can be detected")
+	_, err := initsystem.GetInitSystem()
+	if err != nil {
+		return warnings, []error{err}
+	}
+
+	return warnings, errorList
+}
+
 // ServiceCheck verifies that the given service is enabled and active. If we do not
 // detect a supported init system however, all checks are skipped and a warning is
 // returned.
@@ -903,7 +921,7 @@ func (MemCheck) Name() string {
 // The boolean flag 'isSecondaryControlPlane' controls whether we are running checks in a --join-control-plane scenario.
 // The boolean flag 'downloadCerts' controls whether we should skip checks on certificates because we are downloading them.
 // If the flag is set to true we should skip checks already executed by RunJoinNodeChecks.
-func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfiguration, ignorePreflightErrors sets.String, isSecondaryControlPlane bool, downloadCerts bool) error {
+func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfiguration, ignorePreflightErrors sets.String, isSecondaryControlPlane bool, downloadCerts bool, serviceHosting bool) error {
 	if !isSecondaryControlPlane {
 		// First, check if we're root separately from the other preflight checks and fail fast
 		if err := RunRootCheckOnly(ignorePreflightErrors); err != nil {
@@ -918,15 +936,30 @@ func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfigura
 		// TODO: support other OS, if control-plane is supported on it.
 		MemCheck{Mem: kubeadmconstants.ControlPlaneMem},
 		KubernetesVersionCheck{KubernetesVersion: cfg.KubernetesVersion, KubeadmVersion: kubeadmversion.Get().GitVersion},
-		FirewalldCheck{ports: []int{int(cfg.LocalAPIEndpoint.BindPort), kubeadmconstants.KubeletPort}},
+		FirewalldCheck{ports: []int{int(cfg.LocalAPIEndpoint.BindPort)}},
 		PortOpenCheck{port: int(cfg.LocalAPIEndpoint.BindPort)},
 		PortOpenCheck{port: kubeadmconstants.KubeSchedulerPort},
 		PortOpenCheck{port: kubeadmconstants.KubeControllerManagerPort},
-		FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeAPIServer, manifestsDir)},
-		FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeControllerManager, manifestsDir)},
-		FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeScheduler, manifestsDir)},
-		FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.Etcd, manifestsDir)},
 		HTTPProxyCheck{Proto: "https", Host: cfg.LocalAPIEndpoint.AdvertiseAddress},
+	}
+	if serviceHosting {
+		checks = append(checks,
+			InitSystemCheck{},
+			InPathCheck{executable: kubeadmconstants.KubeAPIServer, mandatory: true, exec: execer},
+			InPathCheck{executable: kubeadmconstants.KubeControllerManager, mandatory: true, exec: execer},
+			InPathCheck{executable: kubeadmconstants.KubeScheduler, mandatory: true, exec: execer},
+			InPathCheck{executable: kubeadmconstants.Etcd, mandatory: true, exec: execer},
+		)
+	} else {
+		checks = append(checks,
+			FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeAPIServer, manifestsDir)},
+			FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeControllerManager, manifestsDir)},
+			FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.KubeScheduler, manifestsDir)},
+			FileAvailableCheck{Path: kubeadmconstants.GetStaticPodFilepath(kubeadmconstants.Etcd, manifestsDir)},
+			FirewalldCheck{ports: []int{kubeadmconstants.KubeletPort}},
+			ServiceCheck{Service: "kubelet", CheckIfActive: false},
+			PortOpenCheck{port: kubeadmconstants.KubeletPort},
+		)
 	}
 	cidrs := strings.Split(cfg.Networking.ServiceSubnet, ",")
 	for _, cidr := range cidrs {
@@ -938,7 +971,7 @@ func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfigura
 	}
 
 	if !isSecondaryControlPlane {
-		checks = addCommonChecks(execer, cfg.KubernetesVersion, &cfg.NodeRegistration, checks)
+		checks = addCommonChecks(execer, cfg.KubernetesVersion, &cfg.NodeRegistration, serviceHosting, checks)
 
 		// Check if Bridge-netfilter and IPv6 relevant flags are set
 		if ip := netutils.ParseIPSloppy(cfg.LocalAPIEndpoint.AdvertiseAddress); ip != nil {
@@ -983,7 +1016,7 @@ func RunInitNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.InitConfigura
 }
 
 // RunJoinNodeChecks executes all individual, applicable to node checks.
-func RunJoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfiguration, ignorePreflightErrors sets.String) error {
+func RunJoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfiguration, ignorePreflightErrors sets.String, serviceHosting bool) error {
 	// First, check if we're root separately from the other preflight checks and fail fast
 	if err := RunRootCheckOnly(ignorePreflightErrors); err != nil {
 		return err
@@ -993,7 +1026,7 @@ func RunJoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfigura
 		FileAvailableCheck{Path: filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.KubeletKubeConfigFileName)},
 		FileAvailableCheck{Path: filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.KubeletBootstrapKubeConfigFileName)},
 	}
-	checks = addCommonChecks(execer, "", &cfg.NodeRegistration, checks)
+	checks = addCommonChecks(execer, "", &cfg.NodeRegistration, serviceHosting, checks)
 	if cfg.ControlPlane == nil {
 		checks = append(checks, FileAvailableCheck{Path: cfg.CACertPath})
 	}
@@ -1024,7 +1057,7 @@ func RunJoinNodeChecks(execer utilsexec.Interface, cfg *kubeadmapi.JoinConfigura
 
 // addCommonChecks is a helper function to duplicate checks that are common between both the
 // kubeadm init and join commands
-func addCommonChecks(execer utilsexec.Interface, k8sVersion string, nodeReg *kubeadmapi.NodeRegistrationOptions, checks []Checker) []Checker {
+func addCommonChecks(execer utilsexec.Interface, k8sVersion string, nodeReg *kubeadmapi.NodeRegistrationOptions, serviceHosting bool, checks []Checker) []Checker {
 	containerRuntime, err := utilruntime.NewContainerRuntime(execer, nodeReg.CRISocket)
 	isDocker := false
 	if err != nil {
@@ -1056,13 +1089,27 @@ func addCommonChecks(execer utilsexec.Interface, k8sVersion string, nodeReg *kub
 			InPathCheck{executable: "socat", mandatory: false, exec: execer},
 			InPathCheck{executable: "tc", mandatory: false, exec: execer},
 			InPathCheck{executable: "touch", mandatory: false, exec: execer})
+
+		if serviceHosting {
+			checks = append(checks,
+				InitSystemCheck{},
+				InPathCheck{executable: kubeadmconstants.KubeAPIServer, mandatory: true, exec: execer},
+				InPathCheck{executable: kubeadmconstants.KubeControllerManager, mandatory: true, exec: execer},
+				InPathCheck{executable: kubeadmconstants.KubeScheduler, mandatory: true, exec: execer},
+				InPathCheck{executable: kubeadmconstants.Etcd, mandatory: true, exec: execer},
+			)
+		} else {
+			checks = append(checks,
+				KubeletVersionCheck{KubernetesVersion: k8sVersion, exec: execer},
+				ServiceCheck{Service: "kubelet", CheckIfActive: false},
+				PortOpenCheck{port: kubeadmconstants.KubeletPort},
+			)
+		}
 	}
 	checks = append(checks,
 		SystemVerificationCheck{IsDocker: isDocker},
 		HostnameCheck{nodeName: nodeReg.Name},
-		KubeletVersionCheck{KubernetesVersion: k8sVersion, exec: execer},
-		ServiceCheck{Service: "kubelet", CheckIfActive: false},
-		PortOpenCheck{port: kubeadmconstants.KubeletPort})
+	)
 	return checks
 }
 

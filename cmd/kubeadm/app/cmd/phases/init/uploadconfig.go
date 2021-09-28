@@ -87,6 +87,7 @@ func NewUploadConfigPhase() workflow.Phase {
 				Long:         uploadKubeletConfigLongDesc,
 				Example:      uploadKubeletConfigExample,
 				Run:          runUploadKubeletConfig,
+				RunIf:        runUploadKubeletConfigIf,
 				InheritFlags: getUploadConfigPhaseFlags(),
 			},
 		},
@@ -112,6 +113,19 @@ func runUploadKubeadmConfig(c workflow.RunData) error {
 		return errors.Wrap(err, "error uploading the kubeadm ClusterConfiguration")
 	}
 	return nil
+}
+
+func runUploadKubeletConfigIf(c workflow.RunData) (bool, error) {
+	data, ok := c.(InitData)
+	if !ok {
+		return false, errors.New("upload-config phase: RunIf invoked with an invalid data struct")
+	}
+
+	if data.ServiceHosting() {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // runUploadKubeletConfig uploads the kubelet configuration to a ConfigMap

@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	etcdphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/etcd"
+	etcdutil "k8s.io/kubernetes/cmd/kubeadm/app/util/etcd"
 )
 
 // NewCheckEtcdPhase is a hidden phase that runs after the control-plane-prepare and
@@ -58,6 +59,14 @@ func runCheckEtcdPhase(c workflow.RunData) error {
 
 	fmt.Println("[check-etcd] Checking that the etcd cluster is healthy")
 
+	if data.ServiceHosting() {
+		// In case of service-hosted control-plane we can not discover the etcd cluster
+		// reading the static pod mirrors from API Server.
+		// We have to use the IP or domain name of the server which we are joining.
+		endpoint := etcdutil.GetClientURLFromJoinEndpoint(data.Cfg().Discovery.BootstrapToken.APIServerEndpoint)
+		return etcdphase.CheckLocalEtcdClusterStatus(endpoint, data.CertificateWriteDir())
+	}
+
 	// Checks that the etcd cluster is healthy
 	// NB. this check cannot be implemented before because it requires the admin.conf and all the certificates
 	//     for connecting to etcd already in place
@@ -66,5 +75,5 @@ func runCheckEtcdPhase(c workflow.RunData) error {
 		return err
 	}
 
-	return etcdphase.CheckLocalEtcdClusterStatus(client, data.CertificateWriteDir())
+	return etcdphase.CheckLocalEtcdClusterStatusByDiscoveringPods(client, data.CertificateWriteDir())
 }

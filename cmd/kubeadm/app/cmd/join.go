@@ -134,6 +134,7 @@ type joinOptions struct {
 	joinControlPlane      *kubeadmapiv1.JoinControlPlane
 	patchesDir            string
 	dryRun                bool
+	serviceHosting        bool
 }
 
 // compile-time assert that the local data object satisfies the phases data interface.
@@ -151,6 +152,7 @@ type joinData struct {
 	patchesDir            string
 	dryRun                bool
 	dryRunDir             string
+	serviceHosting        bool
 }
 
 // newCmdJoin returns "kubeadm join" command.
@@ -302,6 +304,10 @@ func addJoinOtherFlags(flagSet *flag.FlagSet, joinOptions *joinOptions) {
 	flagSet.BoolVar(
 		&joinOptions.dryRun, options.DryRun, joinOptions.dryRun,
 		"Don't apply any changes; just output what would be done.",
+	)
+	flagSet.BoolVar(
+		&joinOptions.serviceHosting, options.ServiceHosting, joinOptions.serviceHosting,
+		"Run control-plane components as unix services.",
 	)
 	options.AddPatchesFlag(flagSet, &joinOptions.patchesDir)
 }
@@ -469,6 +475,7 @@ func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Wri
 		patchesDir:            opt.patchesDir,
 		dryRun:                opt.dryRun,
 		dryRunDir:             dryRunDir,
+		serviceHosting:        opt.serviceHosting,
 	}, nil
 }
 
@@ -504,6 +511,21 @@ func (j *joinData) KubeletDir() string {
 		return j.dryRunDir
 	}
 	return kubeadmconstants.KubeletRunDirectory
+}
+
+func (j *joinData) ServiceHosting() bool {
+	return j.serviceHosting
+}
+
+func (j *joinData) StaticPodsHosting() bool {
+	return j.serviceHosting
+}
+
+func (j *joinData) ServiceUnitDir() string {
+	if j.dryRun {
+		return j.dryRunDir
+	}
+	return kubeadmconstants.GetServiceUnitDirectory()
 }
 
 // ManifestDir returns the path where manifest should be stored or the temporary folder path in case of DryRun.

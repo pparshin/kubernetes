@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -286,6 +287,10 @@ const (
 
 	// KubeletHealthzPort is the port of the kubelet healthz endpoint
 	KubeletHealthzPort = 10248
+
+	// ServiceHostingConfigurationFilename specifies the file name of the node configuration
+	// in case of bootstrapping as unix services.
+	ServiceHostingConfigurationFilename = "service-hosted.conf"
 
 	// MinExternalEtcdVersion indicates minimum external etcd version which kubeadm supports
 	MinExternalEtcdVersion = "3.2.18"
@@ -566,9 +571,28 @@ func GetStaticPodDirectory() string {
 	return filepath.Join(KubernetesDir, ManifestsSubDirName)
 }
 
+// GetServiceUnitDirectory returns the location on the disk where the service unit should be present
+func GetServiceUnitDirectory() string {
+	_, err := exec.LookPath("openrc")
+	if err == nil {
+		return "/etc/conf.d"
+	}
+
+	return "/etc/systemd/system"
+}
+
+func GetServiceHostedConfigFilepath() string {
+	return filepath.Join(KubernetesDir, ServiceHostingConfigurationFilename)
+}
+
 // GetStaticPodFilepath returns the location on the disk where the Static Pod should be present
 func GetStaticPodFilepath(componentName, manifestsDir string) string {
 	return filepath.Join(manifestsDir, componentName+".yaml")
+}
+
+// GetSystemUnitFilepath returns the location on the disk where the service unit should be present
+func GetSystemUnitFilepath(componentName, unitsDir string) string {
+	return filepath.Join(unitsDir, componentName+".service")
 }
 
 // GetAdminKubeConfigPath returns the location on the disk where admin kubeconfig is located by default

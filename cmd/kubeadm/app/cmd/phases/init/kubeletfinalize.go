@@ -60,9 +60,23 @@ func NewKubeletFinalizePhase() workflow.Phase {
 				Short:        "Enable kubelet client certificate rotation",
 				InheritFlags: []string{options.CfgPath, options.CertificatesDir},
 				Run:          runKubeletFinalizeCertRotation,
+				RunIf:        runKubeletFinalizeStartIf,
 			},
 		},
 	}
+}
+
+func runKubeletFinalizeStartIf(c workflow.RunData) (bool, error) {
+	data, ok := c.(InitData)
+	if !ok {
+		return false, errors.New("kubelet-finalize phase: RunIf invoked with an invalid data struct")
+	}
+
+	if data.ServiceHosting() {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // runKubeletFinalizeCertRotation detects if the kubelet certificate rotation is enabled

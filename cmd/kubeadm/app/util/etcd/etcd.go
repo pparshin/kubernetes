@@ -90,6 +90,29 @@ func New(endpoints []string, ca, cert, key string) (*Client, error) {
 	return &client, nil
 }
 
+func NewFromEndpoint(endpoint, certificatesDir string) (*Client, error) {
+	klog.V(1).Infof("local etcd endpoint: %s", endpoint)
+
+	etcdClient, err := New(
+		[]string{endpoint},
+		filepath.Join(certificatesDir, constants.EtcdCACertName),
+		filepath.Join(certificatesDir, constants.EtcdHealthcheckClientCertName),
+		filepath.Join(certificatesDir, constants.EtcdHealthcheckClientKeyName),
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "error creating etcd client for '%s' endpoint", endpoint)
+	}
+
+	// synchronizes client's endpoints with the known endpoints from the etcd membership.
+	err = etcdClient.Sync()
+	if err != nil {
+		return nil, errors.Wrap(err, "error syncing endpoints with etcd")
+	}
+	klog.V(1).Infof("update etcd endpoints: %s", strings.Join(etcdClient.Endpoints, ","))
+
+	return etcdClient, nil
+}
+
 // NewFromCluster creates an etcd client for the etcd endpoints present in etcd member list. In order to compose this information,
 // it will first discover at least one etcd endpoint to connect to. Once created, the client synchronizes client's endpoints with
 // the known endpoints from the etcd membership API, since it is the authoritative source of truth for the list of available members.
@@ -495,6 +518,11 @@ func (c *Client) WaitForClusterAvailable(retries int, retryInterval time.Duratio
 		return true, nil
 	}
 	return false, errors.New("timeout waiting for etcd cluster to be available")
+}
+
+func GetClientURLFromJoinEndpoint(joinAPIEndpoint string) string {
+	host, _, _ := net.SplitHostPort(joinAPIEndpoint)
+	return "https://" + net.JoinHostPort(host, strconv.Itoa(constants.EtcdListenClientPort))
 }
 
 // GetClientURL creates an HTTPS URL that uses the configured advertise

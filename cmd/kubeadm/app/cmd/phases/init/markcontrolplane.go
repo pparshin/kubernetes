@@ -17,12 +17,15 @@ limitations under the License.
 package phases
 
 import (
+	"fmt"
+
 	"github.com/pkg/errors"
 
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/options"
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	markcontrolplanephase "k8s.io/kubernetes/cmd/kubeadm/app/phases/markcontrolplane"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/servicehosting"
 )
 
 var (
@@ -54,6 +57,16 @@ func runMarkControlPlane(c workflow.RunData) error {
 	data, ok := c.(InitData)
 	if !ok {
 		return errors.New("mark-control-plane phase invoked with an invalid data struct")
+	}
+
+	if data.ServiceHosting() {
+		err := servicehosting.MarkControlPlaneAsServiceHosted(&servicehosting.LocalConfig{
+			KubeAPIServerAdvertiseAddressEndpoint: data.Cfg().LocalAPIEndpoint.String(),
+		})
+		if err != nil {
+			return fmt.Errorf("mark-control-plane: %v", err)
+		}
+		return nil
 	}
 
 	client, err := data.Client()

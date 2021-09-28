@@ -38,8 +38,11 @@ type JoinData interface {
 	OutputWriter() io.Writer
 	PatchesDir() string
 	DryRun() bool
+	ServiceHosting() bool
+	StaticPodsHosting() bool
 	KubeConfigDir() string
 	KubeletDir() string
 	ManifestDir() string
+	ServiceUnitDir() string
 	CertificateWriteDir() string
 }

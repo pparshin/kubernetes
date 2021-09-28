@@ -37,12 +37,15 @@ func (t *testInitData) SetCertificateKey(key string)         {}
 func (t *testInitData) SkipCertificateKeyPrint() bool        { return false }
 func (t *testInitData) Cfg() *kubeadmapi.InitConfiguration   { return nil }
 func (t *testInitData) DryRun() bool                         { return false }
+func (t *testInitData) ServiceHosting() bool 				 { return false }
+func (t *testInitData) StaticPodsHosting() bool 			 { return true }
 func (t *testInitData) SkipTokenPrint() bool                 { return false }
 func (t *testInitData) IgnorePreflightErrors() sets.String   { return nil }
 func (t *testInitData) CertificateWriteDir() string          { return "" }
 func (t *testInitData) CertificateDir() string               { return "" }
 func (t *testInitData) KubeConfigDir() string                { return "" }
 func (t *testInitData) KubeConfigPath() string               { return "" }
+func (t *testInitData) ServiceUnitDir() string 				 { return "" }
 func (t *testInitData) ManifestDir() string                  { return "" }
 func (t *testInitData) KubeletDir() string                   { return "" }
 func (t *testInitData) ExternalCA() bool                     { return false }

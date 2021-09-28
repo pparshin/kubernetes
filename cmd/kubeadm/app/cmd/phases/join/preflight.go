@@ -90,7 +90,7 @@ func runPreflight(c workflow.RunData) error {
 
 	// Start with general checks
 	klog.V(1).Infoln("[preflight] Running general checks")
-	if err := preflight.RunJoinNodeChecks(utilsexec.New(), j.Cfg(), j.IgnorePreflightErrors()); err != nil {
+	if err := preflight.RunJoinNodeChecks(utilsexec.New(), j.Cfg(), j.IgnorePreflightErrors(), j.ServiceHosting()); err != nil {
 		return err
 	}
 
@@ -119,20 +119,22 @@ func runPreflight(c workflow.RunData) error {
 		// run kubeadm init preflight checks for checking all the prerequisites
 		fmt.Println("[preflight] Running pre-flight checks before initializing the new control plane instance")
 
-		if err := preflight.RunInitNodeChecks(utilsexec.New(), initCfg, j.IgnorePreflightErrors(), true, hasCertificateKey); err != nil {
+		if err := preflight.RunInitNodeChecks(utilsexec.New(), initCfg, j.IgnorePreflightErrors(), true, hasCertificateKey, j.ServiceHosting()); err != nil {
 			return err
 		}
 
-		if j.DryRun() {
-			fmt.Println("[preflight] Would pull the required images (like 'kubeadm config images pull')")
-			return nil
-		}
+		if j.StaticPodsHosting() {
+			if j.DryRun() {
+				fmt.Println("[preflight] Would pull the required images (like 'kubeadm config images pull')")
+				return nil
+			}
 
-		fmt.Println("[preflight] Pulling images required for setting up a Kubernetes cluster")
-		fmt.Println("[preflight] This might take a minute or two, depending on the speed of your internet connection")
-		fmt.Println("[preflight] You can also perform this action in beforehand using 'kubeadm config images pull'")
-		if err := preflight.RunPullImagesCheck(utilsexec.New(), initCfg, j.IgnorePreflightErrors()); err != nil {
-			return err
+			fmt.Println("[preflight] Pulling images required for setting up a Kubernetes cluster")
+			fmt.Println("[preflight] This might take a minute or two, depending on the speed of your internet connection")
+			fmt.Println("[preflight] You can also perform this action in beforehand using 'kubeadm config images pull'")
+			if err := preflight.RunPullImagesCheck(utilsexec.New(), initCfg, j.IgnorePreflightErrors()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -35,6 +35,7 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/phases/copycerts"
 	kubeconfigphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/kubeconfig"
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/servicehosting"
 )
 
 var controlPlanePrepareExample = cmdutil.Examples(`
@@ -163,7 +164,7 @@ func newControlPlanePrepareKubeconfigSubphase() workflow.Phase {
 func newControlPlanePrepareControlPlaneSubphase() workflow.Phase {
 	return workflow.Phase{
 		Name:          "control-plane",
-		Short:         "Generate the manifests for the new control plane components",
+		Short:         "Generate the manifests or unix service files for the new control plane components",
 		Run:           runControlPlanePrepareControlPlaneSubphase, //NB. eventually in future we would like to break down this in sub phases for each component
 		InheritFlags:  getControlPlanePreparePhaseFlags("control-plane"),
 		ArgsValidator: cobra.NoArgs,
@@ -181,17 +182,40 @@ func runControlPlanePrepareControlPlaneSubphase(c workflow.RunData) error {
 		return nil
 	}
 
+	if data.ServiceHosting() {
+		err := servicehosting.MarkControlPlaneAsServiceHosted(&servicehosting.LocalConfig{
+			KubeAPIServerAdvertiseAddressEndpoint: data.Cfg().ControlPlane.LocalAPIEndpoint.String(),
+		})
+		if err != nil {
+			return fmt.Errorf("[control-plane]: %v", err)
+		}
+	}
+
 	cfg, err := data.InitCfg()
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("[control-plane] Using manifest folder %q\n", data.ManifestDir())
-
-	// If we're dry-running, set CertificatesDir to default value to get the right cert path in static pod yaml
+	// If we're dry-running, set CertificatesDir to default value to get the right cert path
 	if data.DryRun() {
 		cfg.CertificatesDir = filepath.Join(kubeadmconstants.KubernetesDir, kubeadmconstants.DefaultCertificateDir)
 	}
+
+	if data.ServiceHosting() {
+		fmt.Printf("[control-plane] Using service unit folder %q\n", data.ServiceUnitDir())
+
+		for _, component := range kubeadmconstants.ControlPlaneComponents {
+			fmt.Printf("[control-plane] Creating service unit for %q\n", component)
+			err := controlplane.CreateServiceUnitFiles(data.ServiceUnitDir(), &cfg.ClusterConfiguration, &cfg.LocalAPIEndpoint, component)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	fmt.Printf("[control-plane] Using manifest folder %q\n", data.ManifestDir())
 
 	for _, component := range kubeadmconstants.ControlPlaneComponents {
 		fmt.Printf("[control-plane] Creating static Pod manifest for %q\n", component)

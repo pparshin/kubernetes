@@ -26,6 +26,7 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	cmdutil "k8s.io/kubernetes/cmd/kubeadm/app/cmd/util"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
+	"k8s.io/kubernetes/cmd/kubeadm/app/phases/controlplane"
 	etcdphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/etcd"
 	markcontrolplanephase "k8s.io/kubernetes/cmd/kubeadm/app/phases/markcontrolplane"
 	etcdutil "k8s.io/kubernetes/cmd/kubeadm/app/util/etcd"
@@ -66,6 +67,7 @@ func NewControlPlaneJoinPhase() workflow.Phase {
 				ArgsValidator:  cobra.NoArgs,
 			},
 			newEtcdLocalSubphase(),
+			newServiceHostingStartSubphase(),
 			newUpdateStatusSubphase(),
 			newMarkControlPlaneSubphase(),
 		},
@@ -78,6 +80,16 @@ func newEtcdLocalSubphase() workflow.Phase {
 		Short:         "Add a new local etcd member",
 		Run:           runEtcdPhase,
 		InheritFlags:  getControlPlaneJoinPhaseFlags("etcd"),
+		ArgsValidator: cobra.NoArgs,
+	}
+}
+
+func newServiceHostingStartSubphase() workflow.Phase {
+	return workflow.Phase{
+		Name:          "service-hosting-start",
+		Short:         "Starts control plane components as unix services in case of service-hosting",
+		Run:           runServiceHostingStartPhase,
+		InheritFlags:  getControlPlaneJoinPhaseFlags("service-hosting-start"),
 		ArgsValidator: cobra.NoArgs,
 	}
 }
@@ -139,18 +151,54 @@ func runEtcdPhase(c workflow.RunData) error {
 		fmt.Printf("[dryrun] Would ensure that %q directory is present\n", cfg.Etcd.Local.DataDir)
 	}
 
-	// Adds a new etcd instance; in order to do this the new etcd instance should be "announced" to
-	// the existing etcd members before being created.
-	// This operation must be executed after kubelet is already started in order to minimize the time
-	// between the new etcd member is announced and the start of the static pod running the new etcd member, because during
-	// this time frame etcd gets temporary not available (only when moving from 1 to 2 members in the etcd cluster).
-	// From https://coreos.com/etcd/docs/latest/v2/runtime-configuration.html
-	// "If you add a new member to a 1-node cluster, the cluster cannot make progress before the new member starts
-	// because it needs two members as majority to agree on the consensus. You will only see this behavior between the time
-	// etcdctl member add informs the cluster about the new member and the new member successfully establishing a connection to the
-	// existing one."
-	if err := etcdphase.CreateStackedEtcdStaticPodManifestFile(client, data.ManifestDir(), data.PatchesDir(), cfg.NodeRegistration.Name, &cfg.ClusterConfiguration, &cfg.LocalAPIEndpoint, data.DryRun(), data.CertificateWriteDir()); err != nil {
-		return errors.Wrap(err, "error creating local etcd static pod manifest file")
+	if data.StaticPodsHosting() {
+		// Adds a new etcd instance; in order to do this the new etcd instance should be "announced" to
+		// the existing etcd members before being created.
+		// This operation must be executed after kubelet is already started in order to minimize the time
+		// between the new etcd member is announced and the start of the static pod running the new etcd member, because during
+		// this time frame etcd gets temporary not available (only when moving from 1 to 2 members in the etcd cluster).
+		// From https://coreos.com/etcd/docs/latest/v2/runtime-configuration.html
+		// "If you add a new member to a 1-node cluster, the cluster cannot make progress before the new member starts
+		// because it needs two members as majority to agree on the consensus. You will only see this behavior between the time
+		// etcdctl member add informs the cluster about the new member and the new member successfully establishing a connection to the
+		// existing one."
+		if err := etcdphase.CreateStackedEtcdStaticPodManifestFile(client, data.ManifestDir(), data.PatchesDir(), cfg.NodeRegistration.Name, &cfg.ClusterConfiguration, &cfg.LocalAPIEndpoint, data.DryRun(), data.CertificateWriteDir()); err != nil {
+			return errors.Wrap(err, "error creating local etcd static pod manifest file")
+		}
+	} else {
+		err := etcdphase.RunStackedEtcdService(data.ServiceUnitDir(), cfg.NodeRegistration.Name, &cfg.ClusterConfiguration, &cfg.LocalAPIEndpoint, data.DryRun(), data.CertificateWriteDir())
+		if err != nil {
+			return errors.Wrap(err, "error creating etcd unix service and joining the cluster")
+		}
+	}
+
+	return nil
+}
+
+func runServiceHostingStartPhase(c workflow.RunData) error {
+	data, ok := c.(JoinData)
+	if !ok {
+		return errors.New("control-plane-join phase invoked with an invalid data struct")
+	}
+
+	if data.Cfg().ControlPlane == nil {
+		return nil
+	}
+
+	if data.ServiceHosting() {
+		fmt.Println("[control-plane-join] using static Pods - no unix services started")
+		return nil
+	}
+
+	for _, component := range kubeadmconstants.ControlPlaneComponents {
+		if data.DryRun() {
+			fmt.Printf("[dryrun] Would run system service for component %s\n", component)
+		} else {
+			err := controlplane.RunServices(component)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -176,6 +224,11 @@ func runMarkControlPlanePhase(c workflow.RunData) error {
 	}
 
 	if data.Cfg().ControlPlane == nil {
+		return nil
+	}
+
+	if data.ServiceHosting() {
+		fmt.Println("[control-plane-join] nothing to mark in service-hosted control-plane")
 		return nil
 	}
 

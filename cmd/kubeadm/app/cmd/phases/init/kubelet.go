@@ -44,12 +44,26 @@ func NewKubeletStartPhase() workflow.Phase {
 		Long:    "Write a file with KubeletConfiguration and an environment file with node specific kubelet settings, and then (re)start kubelet.",
 		Example: kubeletStartPhaseExample,
 		Run:     runKubeletStart,
+		RunIf:   runKubeletStartIf,
 		InheritFlags: []string{
 			options.CfgPath,
 			options.NodeCRISocket,
 			options.NodeName,
 		},
 	}
+}
+
+func runKubeletStartIf(c workflow.RunData) (bool, error) {
+	data, ok := c.(InitData)
+	if !ok {
+		return false, errors.New("kubelet-start phase: RunIf invoked with an invalid data struct")
+	}
+
+	if data.ServiceHosting() {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // runKubeletStart executes kubelet start logic.
