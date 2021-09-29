@@ -467,6 +467,11 @@ func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Wri
 		}
 	}
 
+	serviceHosting := opt.serviceHosting
+	if _, ok := os.LookupEnv("KUBEADM_SERVICE_HOSTING"); ok {
+		serviceHosting = true
+	}
+
 	return &joinData{
 		cfg:                   cfg,
 		tlsBootstrapCfg:       tlsBootstrapCfg,
@@ -475,7 +480,7 @@ func newJoinData(cmd *cobra.Command, args []string, opt *joinOptions, out io.Wri
 		patchesDir:            opt.patchesDir,
 		dryRun:                opt.dryRun,
 		dryRunDir:             dryRunDir,
-		serviceHosting:        opt.serviceHosting,
+		serviceHosting:        serviceHosting,
 	}, nil
 }
 

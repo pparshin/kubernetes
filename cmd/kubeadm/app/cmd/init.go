@@ -382,6 +382,11 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		}
 	}
 
+	serviceHosting := options.serviceHosting
+	if _, ok := os.LookupEnv("KUBEADM_SERVICE_HOSTING"); ok {
+		serviceHosting = true
+	}
+
 	// Checks if an external CA is provided by the user (when the CA Cert is present but the CA Key is not)
 	externalCA, err := certsphase.UsingExternalCA(&cfg.ClusterConfiguration)
 	if externalCA {
@@ -426,7 +431,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		outputWriter:            out,
 		uploadCerts:             options.uploadCerts,
 		skipCertificateKeyPrint: options.skipCertificateKeyPrint,
-		serviceHosting:          options.serviceHosting,
+		serviceHosting:          serviceHosting,
 		patchesDir:              options.patchesDir,
 	}, nil
 }
