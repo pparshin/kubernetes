@@ -161,5 +161,5 @@ func GetInitSystem() (InitSystem, error) {
 		return &OpenRCInitSystem{}, nil
 	}
 
-	return nil, fmt.Errorf("no supported init system detected, skipping checking for services")
+	return nil, fmt.Errorf("no supported init system detected")
 }

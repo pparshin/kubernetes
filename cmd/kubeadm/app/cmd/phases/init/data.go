@@ -34,6 +34,8 @@ type InitData interface {
 	SkipCertificateKeyPrint() bool
 	Cfg() *kubeadmapi.InitConfiguration
 	DryRun() bool
+	ServiceHosting() bool
+	StaticPodsHosting() bool
 	SkipTokenPrint() bool
 	IgnorePreflightErrors() sets.String
 	CertificateWriteDir() string
@@ -41,6 +43,7 @@ type InitData interface {
 	KubeConfigDir() string
 	KubeConfigPath() string
 	ManifestDir() string
+	ServiceUnitDir() string
 	KubeletDir() string
 	ExternalCA() bool
 	OutputWriter() io.Writer

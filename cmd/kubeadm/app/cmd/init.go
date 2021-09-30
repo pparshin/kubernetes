@@ -104,6 +104,7 @@ type initOptions struct {
 	externalClusterCfg      *kubeadmapiv1.ClusterConfiguration
 	uploadCerts             bool
 	skipCertificateKeyPrint bool
+	serviceHosting          bool
 	patchesDir              string
 }
 
@@ -126,6 +127,7 @@ type initData struct {
 	outputWriter            io.Writer
 	uploadCerts             bool
 	skipCertificateKeyPrint bool
+	serviceHosting          bool
 	patchesDir              string
 }
 
@@ -290,6 +292,10 @@ func AddInitOtherFlags(flagSet *flag.FlagSet, initOptions *initOptions) {
 		&initOptions.skipCertificateKeyPrint, options.SkipCertificateKeyPrint, initOptions.skipCertificateKeyPrint,
 		"Don't print the key used to encrypt the control-plane certificates.",
 	)
+	flagSet.BoolVar(
+		&initOptions.serviceHosting, options.ServiceHosting, initOptions.serviceHosting,
+		"Run control-plane components as unix services.",
+	)
 	options.AddPatchesFlag(flagSet, &initOptions.patchesDir)
 }
 
@@ -376,6 +382,11 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		}
 	}
 
+	serviceHosting := options.serviceHosting
+	if _, ok := os.LookupEnv("KUBEADM_SERVICE_HOSTING"); ok {
+		serviceHosting = true
+	}
+
 	// Checks if an external CA is provided by the user (when the CA Cert is present but the CA Key is not)
 	externalCA, err := certsphase.UsingExternalCA(&cfg.ClusterConfiguration)
 	if externalCA {
@@ -420,6 +431,7 @@ func newInitData(cmd *cobra.Command, args []string, options *initOptions, out io
 		outputWriter:            out,
 		uploadCerts:             options.uploadCerts,
 		skipCertificateKeyPrint: options.skipCertificateKeyPrint,
+		serviceHosting:          serviceHosting,
 		patchesDir:              options.patchesDir,
 	}, nil
 }
@@ -452,6 +464,15 @@ func (d *initData) Cfg() *kubeadmapi.InitConfiguration {
 // DryRun returns the DryRun flag.
 func (d *initData) DryRun() bool {
 	return d.dryRun
+}
+
+// ServiceHosting returns the serviceHosting flag.
+func (d *initData) ServiceHosting() bool {
+	return d.serviceHosting
+}
+
+func (d *initData) StaticPodsHosting() bool {
+	return !d.serviceHosting
 }
 
 // SkipTokenPrint returns the SkipTokenPrint flag.
@@ -499,6 +520,14 @@ func (d *initData) ManifestDir() string {
 		return d.dryRunDir
 	}
 	return kubeadmconstants.GetStaticPodDirectory()
+}
+
+// ServiceUnitDir returns the path where service units should be stored or the temporary folder path in case of DryRun.
+func (d *initData) ServiceUnitDir() string {
+	if d.dryRun {
+		return d.dryRunDir
+	}
+	return kubeadmconstants.GetServiceUnitDirectory()
 }
 
 // KubeletDir returns path of the kubelet configuration folder or the temporary folder in case of DryRun.

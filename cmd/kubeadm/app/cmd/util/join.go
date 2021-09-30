@@ -29,10 +29,11 @@ import (
 
 	kubeconfigutil "k8s.io/kubernetes/cmd/kubeadm/app/util/kubeconfig"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/pubkeypin"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/servicehosting"
 )
 
 var joinCommandTemplate = template.Must(template.New("join").Parse(`` +
-	`kubeadm join {{.ControlPlaneHostPort}} --token {{.Token}} \
+	`kubeadm join {{.ControlPlaneHostPort}} {{if .ServiceHosting}}--service-hosting {{end}}--token {{.Token}} \
 	{{range $h := .CAPubKeyPins}}--discovery-token-ca-cert-hash {{$h}} {{end}}{{if .ControlPlane}}\
 	--control-plane {{if .CertificateKey}}--certificate-key {{.CertificateKey}}{{end}}{{end}}`,
 ))
@@ -90,6 +91,7 @@ func getJoinCommand(kubeConfigFile, token, key string, controlPlane, skipTokenPr
 		"ControlPlaneHostPort": strings.Replace(clusterConfig.Server, "https://", "", -1),
 		"CertificateKey":       key,
 		"ControlPlane":         controlPlane,
+		"ServiceHosting":       servicehosting.IsServiceHostedControlPlane(),
 	}
 
 	if skipTokenPrint {

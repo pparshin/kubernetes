@@ -66,6 +66,7 @@ func NewKubeletStartPhase() workflow.Phase {
 		Short: "Write kubelet settings, certificates and (re)start the kubelet",
 		Long:  "Write a file with KubeletConfiguration and an environment file with node specific kubelet settings, and then (re)start kubelet.",
 		Run:   runKubeletStartJoinPhase,
+		RunIf: runKubeletStartJoinPhaseIf,
 		InheritFlags: []string{
 			options.CfgPath,
 			options.NodeCRISocket,
@@ -78,6 +79,19 @@ func NewKubeletStartPhase() workflow.Phase {
 			options.TokenStr,
 		},
 	}
+}
+
+func runKubeletStartJoinPhaseIf(c workflow.RunData) (bool, error) {
+	data, ok := c.(JoinData)
+	if !ok {
+		return false, errors.New("kubelet-start phase: RunIf invoked with an invalid data struct")
+	}
+
+	if data.ServiceHosting() && data.Cfg().ControlPlane != nil {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func getKubeletStartJoinData(c workflow.RunData) (*kubeadmapi.JoinConfiguration, *kubeadmapi.InitConfiguration, *clientcmdapi.Config, error) {

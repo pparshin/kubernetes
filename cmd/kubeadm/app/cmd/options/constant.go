@@ -134,6 +134,9 @@ const (
 	// SkipCertificateKeyPrint flag instruct kubeadm to skip printing certificate key used to encrypt certs by 'kubeadm init'.
 	SkipCertificateKeyPrint = "skip-certificate-key-print"
 
+	// ServiceHosting flag instruct kubeadm to run control plane components as unix services.
+	ServiceHosting = "service-hosting"
+
 	// ForceReset flag instruct kubeadm to reset the node without prompting for confirmation
 	ForceReset = "force"
 

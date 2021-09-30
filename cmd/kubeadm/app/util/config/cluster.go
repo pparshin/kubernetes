@@ -40,6 +40,7 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/componentconfigs"
 	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/util/apiclient"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/servicehosting"
 )
 
 // FetchInitConfigurationFromCluster fetches configuration from a ConfigMap in the cluster
@@ -95,16 +96,7 @@ func getInitConfigurationFromCluster(kubeconfigDir string, client clientset.Inte
 
 	// if this isn't a new controlplane instance (e.g. in case of kubeadm upgrades)
 	// get nodes specific information as well
-	if !newControlPlane {
-		// gets the nodeRegistration for the current from the node object
-		if err := getNodeRegistration(kubeconfigDir, client, &initcfg.NodeRegistration); err != nil {
-			return nil, errors.Wrap(err, "failed to get node registration")
-		}
-		// gets the APIEndpoint for the current node
-		if err := getAPIEndpoint(client, initcfg.NodeRegistration.Name, &initcfg.LocalAPIEndpoint); err != nil {
-			return nil, errors.Wrap(err, "failed to getAPIEndpoint")
-		}
-	} else {
+	if newControlPlane {
 		// In the case where newControlPlane is true we don't go through getNodeRegistration() and initcfg.NodeRegistration.CRISocket is empty.
 		// This forces DetectCRISocket() to be called later on, and if there is more than one CRI installed on the system, it will error out,
 		// while asking for the user to provide an override for the CRI socket. Even if the user provides an override, the call to
@@ -113,6 +105,28 @@ func getInitConfigurationFromCluster(kubeconfigDir string, client clientset.Inte
 		// Thus it's necessary to supply some default value, that will avoid the call to DetectCRISocket() and as
 		// initcfg.NodeRegistration is discarded, setting whatever value here is harmless.
 		initcfg.NodeRegistration.CRISocket = constants.UnknownCRISocket
+	} else if servicehosting.IsServiceHostedControlPlane() {
+		hostCfg, err := servicehosting.LoadServiceHostedConfig()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to read local node configuration")
+		}
+
+		parsedAPIEndpoint, err := kubeadmapi.APIEndpointFromString(hostCfg.KubeAPIServerAdvertiseAddressEndpoint)
+		if err != nil {
+			return nil, errors.Wrapf(err, "could not parse API endpoint for node")
+		}
+
+		initcfg.NodeRegistration.CRISocket = constants.UnknownCRISocket
+		initcfg.LocalAPIEndpoint = parsedAPIEndpoint
+	} else {
+		// gets the nodeRegistration for the current from the node object
+		if err := getNodeRegistration(kubeconfigDir, client, &initcfg.NodeRegistration); err != nil {
+			return nil, errors.Wrap(err, "failed to get node registration")
+		}
+		// gets the APIEndpoint for the current node
+		if err := getAPIEndpoint(client, initcfg.NodeRegistration.Name, &initcfg.LocalAPIEndpoint); err != nil {
+			return nil, errors.Wrap(err, "failed to getAPIEndpoint")
+		}
 	}
 	return initcfg, nil
 }

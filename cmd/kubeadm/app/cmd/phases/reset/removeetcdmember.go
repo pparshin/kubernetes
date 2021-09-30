@@ -19,6 +19,7 @@ package phases
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"k8s.io/klog/v2"
@@ -28,6 +29,8 @@ import (
 	"k8s.io/kubernetes/cmd/kubeadm/app/cmd/phases/workflow"
 	kubeadmconstants "k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	etcdphase "k8s.io/kubernetes/cmd/kubeadm/app/phases/etcd"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/initsystem"
+	"k8s.io/kubernetes/cmd/kubeadm/app/util/servicehosting"
 	utilstaticpod "k8s.io/kubernetes/cmd/kubeadm/app/util/staticpod"
 )
 
@@ -57,9 +60,20 @@ func runRemoveETCDMemberPhase(c workflow.RunData) error {
 	etcdDataDir, err := getEtcdDataDir(etcdManifestPath, cfg)
 	if err == nil {
 		r.AddDirsToClean(etcdDataDir)
-		if cfg != nil {
-			if err := etcdphase.RemoveStackedEtcdMemberFromCluster(r.Client(), cfg); err != nil {
-				klog.Warningf("[reset] failed to remove etcd member: %v, please manually remove this etcd member using etcdctl", err)
+
+		if servicehosting.IsServiceHostedControlPlane() {
+			if cfg != nil {
+				if err := etcdphase.RemoveServiceHostedEtcdMemberFromCluster(cfg); err != nil {
+					klog.Warningf("[reset] failed to remove etcd member: %v, please manually remove this etcd member using etcdctl", err)
+				}
+			}
+
+			stopEtcdService()
+		} else {
+			if cfg != nil {
+				if err := etcdphase.RemoveStackedEtcdMemberFromCluster(r.Client(), cfg); err != nil {
+					klog.Warningf("[reset] failed to remove etcd member: %v, please manually remove this etcd member using etcdctl", err)
+				}
 			}
 		}
 	} else {
@@ -94,4 +108,33 @@ func getEtcdDataDir(manifestPath string, cfg *kubeadmapi.InitConfiguration) (str
 		return dataDir, errors.New("invalid etcd pod manifest")
 	}
 	return dataDir, nil
+}
+
+func stopEtcdService() {
+	initSystem, err := initsystem.GetInitSystem()
+	if err != nil {
+		klog.Warningln("[reset] The etcd service could not be stopped by kubeadm. Unable to detect a supported init system!")
+		klog.Warningln("[reset] Please ensure etcd are stopped manually if you use service-hosting.")
+		return
+	}
+
+	srv := kubeadmconstants.Etcd
+	if initSystem.ServiceIsActive(srv) {
+		fmt.Println("[reset] Stopping the etcd service")
+		if err := initSystem.ServiceStop(srv); err != nil {
+			klog.Warningf("[reset] The %s service could not be stopped by kubeadm: [%v]\n", srv, err)
+			klog.Warningf("[reset] Please ensure %s is stopped manually\n", srv)
+		}
+	}
+
+	unitsDir := kubeadmconstants.GetServiceUnitDirectory()
+	filesToClean := []string{
+		filepath.Join(unitsDir, fmt.Sprintf("%s.service", srv)),
+	}
+	fmt.Printf("[reset] Deleting files: %v\n", filesToClean)
+	for _, path := range filesToClean {
+		if err := os.RemoveAll(path); err != nil {
+			klog.Warningf("[reset] Failed to remove file: %q [%v]\n", path, err)
+		}
+	}
 }

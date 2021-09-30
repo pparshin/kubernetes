@@ -77,7 +77,7 @@ func kubeletConfigFromCluster(h *handler, clientset clientset.Interface, cluster
 	}
 
 	configMapName := constants.GetKubeletConfigMapName(k8sVersion)
-	return h.fromConfigMap(clientset, configMapName, constants.KubeletBaseConfigurationConfigMapKey, true)
+	return h.fromConfigMap(clientset, configMapName, constants.KubeletBaseConfigurationConfigMapKey, false)
 }
 
 // kubeletConfig implements the kubeadmapi.ComponentConfig interface for kubelet

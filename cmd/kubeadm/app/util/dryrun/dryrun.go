@@ -169,3 +169,21 @@ func PrintFilesIfDryRunning(needPrintManifest bool, manifestDir string, outputWr
 
 	return PrintDryRunFiles(files, outputWriter)
 }
+
+// PrintServiceHostingFilesIfDryRunning prints the service unit files to stdout and
+// informs about the temporary directory to go and lookup when dry running
+func PrintServiceHostingFilesIfDryRunning(unitsDir string, outputWriter io.Writer) error {
+	var files []FileToPrint
+
+	fmt.Printf("[dryrun] Wrote certificates, kubeconfig files and control plane units to the %q directory\n", unitsDir)
+	for _, component := range kubeadmconstants.ControlPlaneComponents {
+		realPath := kubeadmconstants.GetSystemUnitFilepath(component, unitsDir)
+		outputPath := kubeadmconstants.GetSystemUnitFilepath(component, kubeadmconstants.GetServiceUnitDirectory())
+		files = append(files, NewFileToPrint(realPath, outputPath))
+	}
+
+	fmt.Println("[dryrun] The certificates or kubeconfig files would not be printed due to their sensitive nature")
+	fmt.Printf("[dryrun] Please examine the %q directory for details about what would be written\n", unitsDir)
+
+	return PrintDryRunFiles(files, outputWriter)
+}

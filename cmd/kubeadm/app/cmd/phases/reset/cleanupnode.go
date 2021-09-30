@@ -56,19 +56,8 @@ func runCleanupNode(c workflow.RunData) error {
 	}
 	certsDir := r.CertificatesDir()
 
-	// Try to stop the kubelet service
-	klog.V(1).Infoln("[reset] Getting init system")
-	initSystem, err := initsystem.GetInitSystem()
-	if err != nil {
-		klog.Warningln("[reset] The kubelet service could not be stopped by kubeadm. Unable to detect a supported init system!")
-		klog.Warningln("[reset] Please ensure kubelet is stopped manually")
-	} else {
-		fmt.Println("[reset] Stopping the kubelet service")
-		if err := initSystem.ServiceStop("kubelet"); err != nil {
-			klog.Warningf("[reset] The kubelet service could not be stopped by kubeadm: [%v]\n", err)
-			klog.Warningln("[reset] Please ensure kubelet is stopped manually")
-		}
-	}
+	// Stop kubelet and component services if any exists.
+	stopSystemServices()
 
 	// Try to unmount mounted directories under kubeadmconstants.KubeletRunDirectory in order to be able to remove the kubeadmconstants.KubeletRunDirectory directory later
 	fmt.Printf("[reset] Unmounting mounted directories in %q\n", kubeadmconstants.KubeletRunDirectory)
@@ -148,6 +137,7 @@ func resetConfigDir(configPathDir, pkiPathDir string) {
 		filepath.Join(configPathDir, kubeadmconstants.KubeletBootstrapKubeConfigFileName),
 		filepath.Join(configPathDir, kubeadmconstants.ControllerManagerKubeConfigFileName),
 		filepath.Join(configPathDir, kubeadmconstants.SchedulerKubeConfigFileName),
+		kubeadmconstants.GetServiceHostedConfigFilepath(),
 	}
 	fmt.Printf("[reset] Deleting files: %v\n", filesToClean)
 	for _, path := range filesToClean {
@@ -180,4 +170,41 @@ func CleanDir(filePath string) error {
 		}
 	}
 	return nil
+}
+
+func stopSystemServices() {
+	klog.V(1).Infoln("[reset] Getting init system")
+	initSystem, err := initsystem.GetInitSystem()
+
+	if err != nil {
+		klog.Warningln("[reset] The kubelet service could not be stopped by kubeadm. Unable to detect a supported init system!")
+		klog.Warningln("[reset] Please ensure kubelet and component services are stopped manually")
+		return
+	}
+
+	services := []string{"kubelet"}
+	services = append(services, kubeadmconstants.ControlPlaneComponents...)
+
+	for _, srv := range services {
+		if initSystem.ServiceIsActive(srv) {
+			fmt.Printf("[reset] Stopping the %s service\n", srv)
+			if err := initSystem.ServiceStop(srv); err != nil {
+				klog.Warningf("[reset] The %s service could not be stopped by kubeadm: [%v]\n", srv, err)
+				klog.Warningf("[reset] Please ensure %s is stopped manually\n", srv)
+			}
+		}
+	}
+
+	unitsDir := kubeadmconstants.GetServiceUnitDirectory()
+	filesToClean := []string{
+		filepath.Join(unitsDir, fmt.Sprintf("%s.service", kubeadmconstants.KubeAPIServer)),
+		filepath.Join(unitsDir, fmt.Sprintf("%s.service", kubeadmconstants.KubeControllerManager)),
+		filepath.Join(unitsDir, fmt.Sprintf("%s.service", kubeadmconstants.KubeScheduler)),
+	}
+	fmt.Printf("[reset] Deleting files: %v\n", filesToClean)
+	for _, path := range filesToClean {
+		if err := os.RemoveAll(path); err != nil {
+			klog.Warningf("[reset] Failed to remove file: %q [%v]\n", path, err)
+		}
+	}
 }

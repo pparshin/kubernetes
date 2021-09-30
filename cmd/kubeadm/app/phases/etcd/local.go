@@ -67,7 +67,28 @@ func CreateLocalEtcdStaticPodManifestFile(manifestDir, patchesDir string, nodeNa
 }
 
 // CheckLocalEtcdClusterStatus verifies health state of local/stacked etcd cluster before installing a new etcd member
-func CheckLocalEtcdClusterStatus(client clientset.Interface, certificatesDir string) error {
+func CheckLocalEtcdClusterStatus(endpoint, certificatesDir string) error {
+	klog.V(1).Info("[etcd] Checking etcd cluster health")
+
+	// creates an etcd client that connects to all the local/stacked etcd members
+	klog.V(1).Info("creating etcd client that connects to etcd pods")
+	etcdClient, err := etcdutil.NewFromEndpoint(endpoint, certificatesDir)
+	if err != nil {
+		return err
+	}
+
+	// Checking health state
+	err = etcdClient.CheckClusterHealth()
+	if err != nil {
+		return errors.Wrap(err, "etcd cluster is not healthy")
+	}
+
+	return nil
+}
+
+// CheckLocalEtcdClusterStatusByDiscoveringPods discovers the etcd endpoints from the Kubernetes cluster
+// and verifies health state of local/stacked etcd cluster before installing a new etcd member
+func CheckLocalEtcdClusterStatusByDiscoveringPods(client clientset.Interface, certificatesDir string) error {
 	klog.V(1).Info("[etcd] Checking etcd cluster health")
 
 	// creates an etcd client that connects to all the local/stacked etcd members
@@ -86,6 +107,18 @@ func CheckLocalEtcdClusterStatus(client clientset.Interface, certificatesDir str
 	return nil
 }
 
+func RemoveServiceHostedEtcdMemberFromCluster(cfg *kubeadmapi.InitConfiguration) error {
+	// creates an etcd client that connects to all the local/stacked etcd members
+	klog.V(1).Info("[etcd] creating etcd client that connects to etcd members")
+	endpoint := etcdutil.GetClientURL(&cfg.LocalAPIEndpoint)
+	etcdClient, err := etcdutil.NewFromEndpoint(endpoint, cfg.CertificatesDir)
+	if err != nil {
+		return err
+	}
+
+	return removeEtcdMemberFromCluster(etcdClient, cfg)
+}
+
 // RemoveStackedEtcdMemberFromCluster will remove a local etcd member from etcd cluster,
 // when reset the control plane node.
 func RemoveStackedEtcdMemberFromCluster(client clientset.Interface, cfg *kubeadmapi.InitConfiguration) error {
@@ -96,6 +129,10 @@ func RemoveStackedEtcdMemberFromCluster(client clientset.Interface, cfg *kubeadm
 		return err
 	}
 
+	return removeEtcdMemberFromCluster(etcdClient, cfg)
+}
+
+func removeEtcdMemberFromCluster(etcdClient *etcdutil.Client, cfg *kubeadmapi.InitConfiguration) error {
 	members, err := etcdClient.ListMembers()
 	if err != nil {
 		return err

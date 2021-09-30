@@ -61,6 +61,19 @@ var (
 		- 'crictl --runtime-endpoint {{ .Socket }} logs CONTAINERID'
 {{ end }}
 	`)))
+
+	servicesFailTempl = template.Must(template.New("init").Parse(dedent.Dedent(`
+	Unfortunately, an error has occurred:
+		{{ .Error }}
+
+	This error is likely caused by:
+		- The components services are not running
+		- The Kubernetes components are unhealthy due to a misconfiguration of the node in some way
+
+	If you are on a systemd-powered system, you can try to troubleshoot the error with the following commands:
+		- 'systemctl status kube-apiserver'
+		- 'journalctl -xeu kube-apiserver'
+	`)))
 )
 
 // NewWaitControlPlanePhase is a hidden phase that runs after the control-plane and etcd phases
@@ -82,8 +95,14 @@ func runWaitControlPlanePhase(c workflow.RunData) error {
 	// If we're dry-running, print the generated manifests.
 	// TODO: think of a better place to move this call - e.g. a hidden phase.
 	if data.DryRun() {
-		if err := dryrunutil.PrintFilesIfDryRunning(true /* needPrintManifest */, data.ManifestDir(), data.OutputWriter()); err != nil {
-			return errors.Wrap(err, "error printing files on dryrun")
+		if data.ServiceHosting() {
+			if err := dryrunutil.PrintServiceHostingFilesIfDryRunning(data.ServiceUnitDir(), data.OutputWriter()); err != nil {
+				return errors.Wrap(err, "error printing files on dryrun")
+			}
+		} else {
+			if err := dryrunutil.PrintFilesIfDryRunning(true /* needPrintManifest */, data.ManifestDir(), data.OutputWriter()); err != nil {
+				return errors.Wrap(err, "error printing files on dryrun")
+			}
 		}
 	}
 
@@ -101,9 +120,16 @@ func runWaitControlPlanePhase(c workflow.RunData) error {
 		return errors.Wrap(err, "error creating waiter")
 	}
 
-	fmt.Printf("[wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory %q. This can take up to %v\n", data.ManifestDir(), timeout)
+	if data.StaticPodsHosting() {
+		fmt.Printf("[wait-control-plane] Waiting for the kubelet to boot up the control plane as static Pods from directory %q. This can take up to %v\n", data.ManifestDir(), timeout)
+	}
 
-	if err := waiter.WaitForKubeletAndFunc(waiter.WaitForAPI); err != nil {
+	if data.ServiceHosting() {
+		err = waiter.WaitForAPI()
+	} else {
+		err = waiter.WaitForKubeletAndFunc(waiter.WaitForAPI)
+	}
+	if err != nil {
 		context := struct {
 			Error    string
 			Socket   string
@@ -114,7 +140,12 @@ func runWaitControlPlanePhase(c workflow.RunData) error {
 			IsDocker: data.Cfg().NodeRegistration.CRISocket == kubeadmconstants.DefaultDockerCRISocket,
 		}
 
-		kubeletFailTempl.Execute(data.OutputWriter(), context)
+		if data.ServiceHosting() {
+			_ = servicesFailTempl.Execute(data.OutputWriter(), context)
+		} else {
+			_ = kubeletFailTempl.Execute(data.OutputWriter(), context)
+		}
+
 		return errors.New("couldn't initialize a Kubernetes cluster")
 	}
 
